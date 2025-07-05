@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Set Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            background-color: #f0f0f0;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        #game-board {
+            display: grid;
+            grid-gap: 10px;
+            justify-content: center;
+            margin: 20px auto;
+        }
+        .card {
+            width: 110px;
+            height: 160px;
+            border: 2px solid #333;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            background-color: white;
+            gap: 2px;
+        }
+        .card.selected {
+            border-color: blue;
+            box-shadow: 0 0 10px blue;
+        }
+        .card.set-highlight {
+            border-color: green;
+            background-color: #e0ffe0;
+        }
+        .shape {
+            margin: 0;
+        }
+        #status {
+            font-size: 18px;
+            margin: 20px;
+        }
+        #controls {
+            margin: 10px;
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.5;
+        }
+        #call-game {
+            display: none;
+        }
+        #score {
+            font-size: 18px;
+            margin: 10px;
+        }
+        #megaset-message, #truncated-megaset-message {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            color: red;
+            text-shadow: 2px 2px 4px #000;
+            display: none;
+            z-index: 1000;
+        }
+        #cards-remaining {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            font-size: 16px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 5px 10px;
+            border-radius: 5px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <h1>Set Game</h1>
+    <div id="controls">
+        <button id="reshuffle-btn" onclick="reshuffle()">Reshuffle</button>
+        <button id="locate-set-btn" onclick="locateSet()">Locate Set</button>
+        <button id="submit-set" onclick="submitSet()" disabled>Submit Set</button>
+        <button id="add-card" onclick="addCard()">Add Card</button>
+        <button id="call-game" onclick="callGame()">Call Game</button>
+    </div>
+    <div id="score">Score: 0</div>
+    <div id="game-board"></div>
+    <div id="status"></div>
+    <div id="megaset-message">MEGASET!</div>
+    <div id="truncated-megaset-message">TRUNCATED MEGASET</div>
+    <div id="cards-remaining">Cards Remaining: 0</div>
+
+    <script>
+        // Card attributes
+        const numbers = [1, 2, 3];
+        const shapes = ['squiggle', 'diamond', 'oval'];
+        const colors = ['red', 'green', 'purple'];
+        const shadings = ['solid', 'striped', 'open'];
+
+        // Game state
+        let deck = [];
+        let board = [];
+        let selectedCards = [];
+        let score = 0;
+        let hasShownMaxCardsMessage = false;
+        let lastHighlightedSet = null;
+        let gameEnded = false;
+        const boardSize = 12;
+        const maxBoardSize = 21;
+
+        function generateDeck() {
+            deck = [];
+            for (let n of numbers) {
+                for (let s of shapes) {
+                    for (let c of colors) {
+                        for (let sh of shadings) {
+                            deck.push({ number: n, shape: s, color: c, shading: sh });
+                        }
+                    }
+                }
+            }
+            shuffle(deck);
+            updateCardsRemaining();
+            updateCallGameButton();
+        }
+
+        function shuffle(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+
+        function dealBoard() {
+            board = deck.splice(0, boardSize);
+            selectedCards = [];
+            hasShownMaxCardsMessage = false;
+            lastHighlightedSet = null;
+            gameEnded = false;
+            renderBoard();
+            updateStatus();
+            updateSubmitButton();
+            updateAddCardButton();
+            updateCallGameButton();
+            updateScore();
+            updateCardsRemaining();
+        }
+
+        function renderBoard(highlightSet = []) {
+            if (gameEnded) return;
+            const boardDiv = document.getElementById('game-board');
+            boardDiv.innerHTML = '';
+            // Dynamically set grid columns based on board length
+            const cardCount = board.length;
+            const columns = Math.min(5, Math.ceil(Math.sqrt(cardCount)));
+            boardDiv.style.gridTemplateColumns = `repeat(${columns}, 120px)`;
+            board.forEach((card, index) => {
+                if (card) { // Ensure card is not null
+                    const cardDiv = document.createElement('div');
+                    cardDiv.className = 'card' +
+                        (selectedCards.includes(index) ? ' selected' : '') +
+                        (highlightSet.includes(index) ? ' set-highlight' : '');
+                    cardDiv.dataset.index = index;
+                    cardDiv.innerHTML = generateCardHTML(card);
+                    cardDiv.addEventListener('click', () => selectCard(index));
+                    boardDiv.appendChild(cardDiv);
+                }
+            });
+        }
+
+        function generateCardHTML(card) {
+            let html = '';
+            for (let i = 0; i < card.number; i++) {
+                html += `<div class="shape">${getShapeSVG(card)}</div>`;
+            }
+            return html;
+        }
+
+        function getShapeSVG(card) {
+            const { shape, color, shading } = card;
+            let fillStyle;
+            if (shading === 'solid') {
+                fillStyle = `fill: ${color};`;
+            } else if (shading === 'striped') {
+                fillStyle = `fill: url(#stripes-${color});`;
+            } else {
+                fillStyle = `fill: none; stroke: ${color}; stroke-width: 2;`;
+            }
+
+            let path;
+            if (shape === 'squiggle') {
+                path = `<path d="M16,40 C12,36 12,28 16,24 S20,16 24,16 C28,16 32,20 32,24 S28,32 24,40 C20,44 16,44 16,40" style="${fillStyle}"/>`;
+            } else if (shape === 'diamond') {
+                path = `<polygon points="24,8 40,24 24,40 8,24" style="${fillStyle}"/>`;
+            } else if (shape === 'oval') {
+                path = `<ellipse cx="24" cy="24" rx="16" ry="12" style="${fillStyle}"/>`;
+            }
+
+            return `
+                <svg width="50" height="50">
+                    <defs>
+                        <pattern id="stripes-${color}" patternUnits="userSpaceOnUse" width="6" height="6">
+                            <line x1="0" y1="0" x2="0" y2="6" stroke="${color}" stroke-width="4"/>
+                        </pattern>
+                    </defs>
+                    ${path}
+                </svg>`;
+        }
+
+        function selectCard(index) {
+            if (gameEnded) return;
+            if (selectedCards.includes(index)) {
+                selectedCards = selectedCards.filter(i => i !== index);
+            } else if (selectedCards.length < 3) {
+                selectedCards.push(index);
+            }
+            renderBoard();
+            updateStatus();
+            updateSubmitButton();
+        }
+
+        function submitSet() {
+            if (gameEnded) return;
+            if (selectedCards.length !== 3) {
+                updateStatus('Please select exactly 3 cards.');
+                return;
+            }
+            const cards = selectedCards.map(i => board[i]);
+            const isSet = isValidSet(cards);
+            if (isSet) {
+                const points = calculatePoints(cards);
+                const isLargeBoard = board.length > 12;
+                const awardedPoints = isLargeBoard ? 1 : points;
+                score += awardedPoints;
+                if (points === 4) {
+                    showMegasetMessage(isLargeBoard ? 'truncated' : 'megaset');
+                }
+                // In-place replacement
+                const indices = [...selectedCards].sort((a, b) => a - b);
+                // Calculate cards needed to maintain at least boardSize
+                const remainingCards = board.length - 3;
+                const cardsNeeded = (deck.length > 0 && remainingCards < boardSize) ? boardSize - remainingCards : 0;
+                const newCards = deck.splice(0, Math.min(cardsNeeded, deck.length));
+                // Replace cards at the selected indices
+                indices.forEach((index, i) => {
+                    board[index] = i < newCards.length ? newCards[i] : null;
+                });
+                // Remove null entries
+                board = board.filter(card => card !== null);
+                selectedCards = [];
+                lastHighlightedSet = null; // Reset on board change
+                if (deck.length < 3 && board.length >= boardSize && deck.length > 0) {
+                    generateDeck();
+                    deck = deck.filter(card => !board.some(b => b && cardsEqual(b, card)));
+                }
+                if (board.length === maxBoardSize) {
+                    hasShownMaxCardsMessage = true;
+                }
+                updateStatus(`Valid set! +${awardedPoints} point${awardedPoints > 1 ? 's' : ''}`);
+                updateScore();
+                updateCardsRemaining();
+                updateCallGameButton();
+            } else {
+                updateStatus('Not a set. Try again.');
+                selectedCards = [];
+            }
+            renderBoard();
+            updateSubmitButton();
+            updateAddCardButton();
+        }
+
+        function calculatePoints(cards) {
+            const attributes = ['number', 'shape', 'color', 'shading'];
+            let points = 0;
+            attributes.forEach(attr => {
+                const values = cards.map(card => card[attr]);
+                const unique = new Set(values);
+                if (unique.size === 3) {
+                    points++;
+                }
+            });
+            return points;
+        }
+
+        function showMegasetMessage(type) {
+            const megasetDiv = document.getElementById(type === 'megaset' ? 'megaset-message' : 'truncated-megaset-message');
+            megasetDiv.style.display = 'block';
+            setTimeout(() => {
+                megasetDiv.style.display = 'none';
+            }, 2000);
+        }
+
+        function isValidSet(cards) {
+            const attributes = ['number', 'shape', 'color', 'shading'];
+            return attributes.every(attr => {
+                const values = cards.map(card => card[attr]);
+                const unique = new Set(values);
+                return unique.size === 1 || unique.size === 3;
+            });
+        }
+
+        function cardsEqual(card1, card2) {
+            return card1.number === card2.number &&
+                   card1.shape === card2.shape &&
+                   card1.color === card2.color &&
+                   card1.shading === card2.shading;
+        }
+
+        function updateStatus(message = '') {
+            if (gameEnded) return;
+            if (!hasShownMaxCardsMessage && board.length === maxBoardSize) {
+                document.getElementById('status').textContent = 'With 21 cards, a set is mathematically certain—this is the smallest such number!';
+            } else {
+                document.getElementById('status').textContent = message || `Select 3 cards to find a set.`;
+            }
+        }
+
+        function updateScore() {
+            document.getElementById('score').textContent = `Score: ${score}`;
+        }
+
+        function updateSubmitButton() {
+            const submitButton = document.getElementById('submit-set');
+            submitButton.disabled = gameEnded || selectedCards.length !== 3;
+        }
+
+        function updateAddCardButton() {
+            const addCardButton = document.getElementById('add-card');
+            addCardButton.disabled = gameEnded || board.length >= maxBoardSize || deck.length === 0;
+        }
+
+        function updateCallGameButton() {
+            const callGameButton = document.getElementById('call-game');
+            callGameButton.style.display = (deck.length === 0 && !gameEnded) ? 'block' : 'none';
+        }
+
+        function updateCardsRemaining() {
+            document.getElementById('cards-remaining').textContent = `Cards Remaining: ${deck.length}`;
+        }
+
+        function addCard() {
+            if (gameEnded) return;
+            if (board.length < maxBoardSize && deck.length > 0) {
+                board.push(deck.shift());
+                lastHighlightedSet = null; // Reset on board change
+                renderBoard();
+                updateStatus('Card added!');
+                updateAddCardButton();
+                updateSubmitButton();
+                updateCardsRemaining();
+                updateCallGameButton();
+            }
+        }
+
+        function reshuffle() {
+            if (gameEnded) return;
+            deck.push(...board.filter(card => card !== null));
+            board = [];
+            shuffle(deck);
+            score = Math.max(0, score - 2); // Subtract 2 points, ensure score >= 0
+            hasShownMaxCardsMessage = false;
+            lastHighlightedSet = null; // Reset on board change
+            dealBoard();
+            updateStatus('Board reshuffled!');
+            updateScore();
+        }
+
+        function locateSet() {
+            if (gameEnded) return;
+            let allSets = [];
+            for (let i = 0; i < board.length - 2; i++) {
+                if (!board[i]) continue;
+                for (let j = i + 1; j < board.length - 1; j++) {
+                    if (!board[j]) continue;
+                    for (let k = j + 1; k < board.length; k++) {
+                        if (!board[k]) continue;
+                        if (isValidSet([board[i], board[j], board[k]])) {
+                            allSets.push([i, j, k]);
+                        }
+                    }
+                }
+            }
+            if (allSets.length > 0) {
+                let availableSets = allSets;
+                // Exclude the last highlighted set if it exists and is still valid
+                if (lastHighlightedSet && allSets.some(set => set.join(',') === lastHighlightedSet.join(','))) {
+                    availableSets = allSets.filter(set => set.join(',') !== lastHighlightedSet.join(','));
+                }
+                // Select a set
+                let selectedSet;
+                if (availableSets.length > 0) {
+                    // Randomly pick from available sets
+                    const randomIndex = Math.floor(Math.random() * availableSets.length);
+                    selectedSet = availableSets[randomIndex];
+                } else {
+                    // Only the last set is available
+                    selectedSet = allSets.find(set => set.join(',') === lastHighlightedSet.join(','));
+                }
+                lastHighlightedSet = selectedSet;
+                renderBoard(selectedSet);
+                updateStatus('Set found! Highlighted cards form a set.');
+            } else {
+                lastHighlightedSet = null;
+                renderBoard();
+                updateStatus('No set found in current grid.');
+            }
+            updateSubmitButton();
+            updateAddCardButton();
+        }
+
+        function callGame() {
+            if (gameEnded) return;
+            gameEnded = true;
+            let rank;
+            if (score <= 39) {
+                rank = 'No Medal';
+            } else if (score <= 59) {
+                rank = 'Bronze';
+            } else if (score <= 79) {
+                rank = 'Silver';
+            } else if (score <= 99) {
+                rank = 'Gold';
+            } else if (score <= 107) {
+                rank = 'Godlike';
+            } else {
+                rank = 'Perfect Game';
+            }
+            document.getElementById('game-board').innerHTML = '';
+            document.getElementById('status').textContent = `Game Over! Final Score: ${score}, Rank: ${rank}. Refresh the page to start a new game.`;
+            document.getElementById('reshuffle-btn').disabled = true;
+            document.getElementById('locate-set-btn').disabled = true;
+            document.getElementById('submit-set').disabled = true;
+            document.getElementById('add-card').disabled = true;
+            document.getElementById('call-game').disabled = true;
+            updateCallGameButton();
+        }
+
+        // Initialize game
+        generateDeck();
+        dealBoard();
+        updateStatus();
+    </script>
+</body>
+</html>
