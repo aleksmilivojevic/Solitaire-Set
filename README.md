@@ -1,4 +1,7 @@
 # Solitaire-Set
+
+Instructions: Save the html file and open it (most likely with a browser by default).
+
 Solitaire version of the game Set -- There are 4 properties that each card features - number, shape, color, and shading. Each property has 3 variations - number can be 1,2,3; shape can be oval, diamond, squiggly; color can be red, green, purple; shading can be empty, half, full. For each combination of variations there is exactly 1 card, totalling in a deck of 81 cards. For example, there is a unique card with 2 half-shaded green ovals.
 
 A set is a collection of three cards such that for each of the four properties, either all the variations for that property exhibited among the three cards are the same, or they are all different. For example, a set would be {2-oval-green-empty, 3-oval-green-full, 1-oval-green-half}. In the properties "number" and "shading", the three cards cover all three variations, while in the properties "shape" and "color" they are all the same. The three cards can be all the same in one property and all different in another, that is fine - the verification of being a set just goes property by property independently. A non-set would be {2-oval-green-empty, 2-oval-green-full, 1-oval-green-half}. Note now that the numbers exhibited are 2,2,1 -- they are not all the same, but they also do not cover all three possibilities.
